@@ -1,56 +1,84 @@
 import streamlit as st
-from openai import OpenAI
+import pandas as pd
+from langchain_openai import ChatOpenAI
+from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+st.set_page_config(page_title="Multi-CSV Data Agent", layout="wide")
+st.title("📊 Ask Questions Across Multiple CSVs")
+
+# -----------------------------------
+# Upload multiple CSVs
+# -----------------------------------
+uploaded_files = st.file_uploader(
+    "Upload one or more CSV files",
+    type=["csv"],
+    accept_multiple_files=True
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+if uploaded_files:
+    dataframes = {}
+    
+    st.subheader("Uploaded Data")
+    for i, file in enumerate(uploaded_files):
+        df = pd.read_csv(file)
+        df_name = f"df_{i}"
+        dataframes[df_name] = df
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+        st.markdown(f"**{df_name}**")
+        st.dataframe(df)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # -----------------------------------
+    # Create LLM
+    # -----------------------------------
+    llm = ChatOpenAI(
+        model="gpt-4.1-mini",
+        temperature=0
+    )
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # -----------------------------------
+    # Create Pandas Agent (multi-DF)
+    # -----------------------------------
+    agent = create_pandas_dataframe_agent(
+        llm,
+        list(dataframes.values()),
+        verbose=False,
+        allow_dangerous_code=True
+    )
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+    # -----------------------------------
+    # Strong system prompt
+    # -----------------------------------
+    SYSTEM_PROMPT = """
+You are a data analysis assistant.
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+Rules:
+- Use ONLY the provided pandas DataFrames.
+- Do NOT use external knowledge.
+- Do NOT make assumptions beyond the data.
+- If the answer cannot be computed from the data, respond exactly with:
+  "Not found in the uploaded CSVs."
+- You may perform pandas operations only.
+"""
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+    # -----------------------------------
+    # User question
+    # -----------------------------------
+    question = st.text_input("Ask a question using the uploaded CSVs")
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    if question:
+        with st.spinner("Analyzing..."):
+            try:
+                response = agent.run(
+                    f"""
+{SYSTEM_PROMPT}
+
+User Question:
+{question}
+"""
+                )
+
+                st.subheader("🤖 Answer")
+                st.success(response)
+
+            except Exception as e:
+                st.error("Unable to answer the question using the uploaded CSVs.")
