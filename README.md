@@ -1,7 +1,3 @@
-
-
-A simple Streamlit app that shows how to build a chatbot using OpenAI's GPT-3.5.
-
 📊 MultiCSVDataAssistant
 
 MultiCSVDataAssistant is a Streamlit-based AI application that allows users to upload one or more small CSV files and ask natural-language questions about the data.
